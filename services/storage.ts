@@ -84,8 +84,7 @@ export const importData = (jsonStr: string): boolean => {
         const data = JSON.parse(jsonStr);
         if (!data.tasks || !data.logs) return false;
         
-        // We use the imported data but KEEP the current device ID for this session,
-        // unless we want to fully clone the other device's identity.
+        // We use the imported data but KEEP the current device ID for this session.
         // Rule: "Identity is tied to the browser". 
         // Strategy: Import data INTO current device ID.
         
