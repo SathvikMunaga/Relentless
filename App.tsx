@@ -1,33 +1,40 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Task, CompletionLog } from './types';
-import { getTasks, saveTasks, getLogs, saveLogs, toggleTaskCompletion } from './services/storage';
+import { getDeviceId, getTasks, saveTasks, getLogs, saveLogs, toggleTaskCompletion, exportData, importData } from './services/storage';
 import { calculateTaskStats, getTodayKey } from './utils';
 import { TaskItem } from './components/TaskItem';
 import { CalendarView } from './components/CalendarView';
 import { StatsView } from './components/StatsView';
 import { StreakHeatmap } from './components/StreakHeatmap';
 import { Button } from './components/Button';
-import { Plus, LayoutDashboard, Calendar as CalIcon, BarChart2 } from 'lucide-react';
+import { Plus, LayoutDashboard, Calendar as CalIcon, BarChart2, HardDrive, Download, Upload, AlertTriangle } from 'lucide-react';
 
 const App: React.FC = () => {
+  // Core State
+  const [deviceId, setDeviceId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [logs, setLogs] = useState<CompletionLog>({});
+  
+  // UI State
   const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [activeTab, setActiveTab] = useState<'tasks' | 'calendar' | 'stats'>('tasks');
+  const [activeTab, setActiveTab] = useState<'tasks' | 'calendar' | 'stats' | 'data'>('tasks');
   const [isAdding, setIsAdding] = useState(false);
+  
+  // File Import Ref
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize Data
+  // 1. Initialize Identity on Mount
   useEffect(() => {
-    const loadedTasks = getTasks();
-    const loadedLogs = getLogs();
-    setTasks(loadedTasks);
-    setLogs(loadedLogs);
+    const id = getDeviceId();
+    setDeviceId(id);
+    setTasks(getTasks(id));
+    setLogs(getLogs(id));
   }, []);
 
   const handleAddTask = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTaskTitle.trim()) return;
+    if (!newTaskTitle.trim() || !deviceId) return;
 
     const newTask: Task = {
       id: uuidv4(),
@@ -37,24 +44,65 @@ const App: React.FC = () => {
 
     const updatedTasks = [...tasks, newTask];
     setTasks(updatedTasks);
-    saveTasks(updatedTasks);
+    saveTasks(deviceId, updatedTasks);
     setNewTaskTitle('');
     setIsAdding(false);
   };
 
   const handleDeleteTask = (taskId: string) => {
+    if (!deviceId) return;
     const updatedTasks = tasks.filter(t => t.id !== taskId);
     setTasks(updatedTasks);
-    saveTasks(updatedTasks);
+    saveTasks(deviceId, updatedTasks);
   };
 
   const handleToggle = (taskId: string) => {
+    if (!deviceId) return;
     const today = getTodayKey();
-    const newLogs = toggleTaskCompletion(taskId, today);
-    setLogs({...newLogs}); // Spread to trigger re-render
+    const newLogs = toggleTaskCompletion(deviceId, taskId, today);
+    setLogs({...newLogs}); 
   };
 
-  // Compute derived state for rendering
+  const handleExport = () => {
+    if (!deviceId) return;
+    const json = exportData(deviceId);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `relentless-backup-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !deviceId) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (importData(content)) {
+        // Reload state
+        setTasks(getTasks(deviceId));
+        setLogs(getLogs(deviceId));
+        alert('Data imported successfully.');
+        setActiveTab('tasks');
+      } else {
+        alert('Failed to import data. Invalid file format.');
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // Compute derived state
   const todayKey = getTodayKey();
   const taskStats = useMemo(() => {
     return tasks.map(t => ({
@@ -63,13 +111,14 @@ const App: React.FC = () => {
     }));
   }, [tasks, logs, todayKey]);
 
-  // Sort tasks: Incomplete first, then by streak (ascending)
   const sortedTaskStats = [...taskStats].sort((a, b) => {
     const aDone = logs[todayKey]?.includes(a.task.id);
     const bDone = logs[todayKey]?.includes(b.task.id);
     if (aDone === bDone) return 0;
     return aDone ? 1 : -1;
   });
+
+  if (!deviceId) return null; // Or a minimal loader
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-200 flex flex-col md:flex-row font-sans selection:bg-emerald-900 selection:text-white">
@@ -81,6 +130,7 @@ const App: React.FC = () => {
             <button onClick={() => setActiveTab('tasks')} className={`p-2 rounded ${activeTab === 'tasks' ? 'text-emerald-500 bg-zinc-900' : 'text-zinc-500'}`}><LayoutDashboard size={20}/></button>
             <button onClick={() => setActiveTab('calendar')} className={`p-2 rounded ${activeTab === 'calendar' ? 'text-emerald-500 bg-zinc-900' : 'text-zinc-500'}`}><CalIcon size={20}/></button>
             <button onClick={() => setActiveTab('stats')} className={`p-2 rounded ${activeTab === 'stats' ? 'text-emerald-500 bg-zinc-900' : 'text-zinc-500'}`}><BarChart2 size={20}/></button>
+            <button onClick={() => setActiveTab('data')} className={`p-2 rounded ${activeTab === 'data' ? 'text-emerald-500 bg-zinc-900' : 'text-zinc-500'}`}><HardDrive size={20}/></button>
         </div>
       </div>
 
@@ -97,10 +147,19 @@ const App: React.FC = () => {
             <Button variant="ghost" className="justify-start text-left" onClick={() => setActiveTab('stats')}>
                <span className={activeTab === 'stats' ? "text-emerald-400" : ""}>Analytics</span>
             </Button>
+            <Button variant="ghost" className="justify-start text-left" onClick={() => setActiveTab('data')}>
+               <span className={activeTab === 'data' ? "text-emerald-400" : ""}>Data & Storage</span>
+            </Button>
         </nav>
         
-        <div className="mt-auto pt-6 border-t border-zinc-900 text-[10px] text-zinc-600 font-mono">
-            DISCIPLINE EQUALS FREEDOM.
+        <div className="mt-auto pt-6 border-t border-zinc-900">
+           <div className="text-[10px] text-zinc-600 font-mono mb-2 flex items-center gap-2">
+               <HardDrive size={10} />
+               <span>DEVICE ID: {deviceId.slice(0, 8)}...</span>
+           </div>
+           <div className="text-[10px] text-zinc-700 font-mono">
+              DISCIPLINE EQUALS FREEDOM.
+           </div>
         </div>
       </aside>
 
@@ -111,7 +170,7 @@ const App: React.FC = () => {
         <div className="hidden md:flex justify-between items-end mb-12">
             <div>
                 <h2 className="text-3xl font-bold text-white mb-2">
-                    {activeTab === 'tasks' ? 'Daily Protocol' : activeTab === 'calendar' ? 'Consistency Log' : 'Performance Analytics'}
+                    {activeTab === 'tasks' ? 'Daily Protocol' : activeTab === 'calendar' ? 'Consistency Log' : activeTab === 'stats' ? 'Performance Analytics' : 'Device Storage'}
                 </h2>
                 <p className="text-zinc-500 text-sm font-mono">
                     {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
@@ -128,7 +187,7 @@ const App: React.FC = () => {
         <div className="space-y-6">
             
             {/* Add Task Form (Mobile & Desktop) */}
-            {(isAdding || (activeTab === 'tasks' && tasks.length === 0)) && (
+            {(isAdding || (activeTab === 'tasks' && tasks.length === 0 && activeTab !== 'data')) && (
                 <form onSubmit={handleAddTask} className="mb-8 animate-in slide-in-from-top-4 fade-in duration-300">
                     <div className="flex gap-2">
                         <input 
@@ -197,7 +256,6 @@ const App: React.FC = () => {
                 <div className="animate-in fade-in duration-300">
                     <StatsView tasks={tasks} logs={logs} />
                     
-                    {/* Additional text stats could go here */}
                     <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="p-6 border border-zinc-800 bg-zinc-900/20 rounded-sm">
                             <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-2">Total Logged Days</h3>
@@ -206,6 +264,58 @@ const App: React.FC = () => {
                         <div className="p-6 border border-zinc-800 bg-zinc-900/20 rounded-sm">
                             <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-2">Active Protocols</h3>
                             <p className="text-3xl font-bold text-white">{tasks.length}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'data' && (
+                <div className="animate-in fade-in duration-300 max-w-xl mx-auto space-y-8">
+                    
+                    <div className="bg-amber-950/10 border border-amber-900/30 p-6 rounded-sm">
+                        <div className="flex items-start gap-4">
+                            <AlertTriangle className="text-amber-500 shrink-0 mt-1" />
+                            <div>
+                                <h3 className="text-amber-500 font-bold mb-2">Local Storage Only</h3>
+                                <p className="text-zinc-400 text-sm leading-relaxed mb-4">
+                                    Your data exists only on this device (<code className="text-amber-200/50 bg-amber-950/30 px-1 rounded">{deviceId.slice(0,8)}...</code>). 
+                                    If you clear your browser cache or use a different device, your progress will be lost.
+                                </p>
+                                <p className="text-zinc-500 text-xs font-mono">
+                                    RECOMMENDATION: Export a backup weekly.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid gap-4">
+                        <div className="bg-zinc-900/40 border border-zinc-800 p-6 rounded-sm flex items-center justify-between">
+                            <div>
+                                <h3 className="text-white font-bold mb-1">Backup Data</h3>
+                                <p className="text-zinc-500 text-xs">Download your entire history as a JSON file.</p>
+                            </div>
+                            <Button onClick={handleExport} variant="primary" className="flex items-center gap-2">
+                                <Download size={16} /> Export
+                            </Button>
+                        </div>
+
+                        <div className="bg-zinc-900/40 border border-zinc-800 p-6 rounded-sm flex items-center justify-between">
+                            <div>
+                                <h3 className="text-white font-bold mb-1">Restore Data</h3>
+                                <p className="text-zinc-500 text-xs">Import a previously exported JSON file.</p>
+                            </div>
+                            <div>
+                                <input 
+                                    type="file" 
+                                    ref={fileInputRef}
+                                    onChange={handleFileChange}
+                                    accept="application/json"
+                                    className="hidden" 
+                                />
+                                <Button onClick={handleImportClick} variant="ghost" className="flex items-center gap-2 border border-zinc-700">
+                                    <Upload size={16} /> Import
+                                </Button>
+                            </div>
                         </div>
                     </div>
                 </div>
