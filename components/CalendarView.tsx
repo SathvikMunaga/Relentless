@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
-import { format, isFuture, isSameDay, getDaysInMonth, addMonths } from 'date-fns';
-import startOfMonth from 'date-fns/startOfMonth';
-import subMonths from 'date-fns/subMonths';
+import { format, isFuture, getDaysInMonth, addMonths, startOfMonth, subMonths } from 'date-fns';
 import { CompletionLog, Task } from '../types';
 import { ChevronLeft, ChevronRight, X, CheckCircle2 } from 'lucide-react';
 import { formatDateKey } from '../utils';
@@ -34,9 +32,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ tasks, logs }) => {
     const dayTasks = logs[key] || [];
     
     // Filter tasks that existed on this date
-    // For simplicity, we assume all current tasks "should" have been done if they exist now.
-    // A more complex app would check creation date. 
-    // Let's check creation date for Brutal Honesty: You can't fail a task that didn't exist.
     const activeTasks = tasks.filter(t => new Date(t.createdAt) <= date && !t.archived);
     
     if (activeTasks.length === 0) return 'empty';

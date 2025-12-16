@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
-import { format, eachDayOfInterval } from 'date-fns';
-import subDays from 'date-fns/subDays';
+import { format, eachDayOfInterval, subDays } from 'date-fns';
 import { Task, CompletionLog } from '../types';
 import { formatDateKey } from '../utils';
 
